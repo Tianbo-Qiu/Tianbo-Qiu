@@ -1,8 +1,3 @@
 
-## 邱天博 (Tianbo Qiu)
+<img width="125" height="125" alt="salarycatdance" src="https://github.com/user-attachments/assets/be7cab45-c060-4e5d-a7b2-239ea4b4a82a" />
 
-```text
-古法编程 | decaf | 学习中
-```
-
-<img width="403" alt="profilepic" src="https://github.com/user-attachments/assets/3398285b-44a3-4975-8add-c95e09ade9e4" />
