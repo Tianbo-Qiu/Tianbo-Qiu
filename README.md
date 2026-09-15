@@ -1,2 +1,1 @@
-
-<img width="125" height="125" alt="salarycatdance" src="https://github.com/user-attachments/assets/be7cab45-c060-4e5d-a7b2-239ea4b4a82a" />
+FOR THE EMPEROR
