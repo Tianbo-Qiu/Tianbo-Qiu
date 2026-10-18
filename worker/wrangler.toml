@@ -1,0 +1,8 @@
+name = "profile-views"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "profile-views"
+database_id = "d7f9693a-caeb-469a-bd8c-8ea0d5e1c4bc"
