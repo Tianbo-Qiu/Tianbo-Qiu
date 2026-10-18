@@ -38,7 +38,7 @@ The profile README shows two images:
 - **Commits** on each repo's **default branch** only, by **author date**, excluding merge commits and authors ending in `[bot]`. Other branches are skipped because they hold unmerged work or build output (`gh-pages`). Work on a feature branch shows up once merged, on the day it was written.
 - **Lines** come from `git log --numstat`, only for files in a known language (`collector/lang.go`). Lockfiles (`go.sum`, `package-lock.json`, …), `vendor/`, `node_modules/`, `dist/` and generated files (`*.pb.go`, `*_gen.go`, `*.min.js`) are ignored.
 - **LOC** = non-blank lines in tracked files on the default branch, using the same language and exclusion rules.
-- **`↑ +N` / `↓ −N` / `→ 0`** = today's LOC minus the LOC in the latest earlier snapshot in `stats/`. On the very first run there is nothing to compare against, so it shows `→ 0`.
+- **`↑ +N` / `↓ −N` / `no change`** = today's LOC minus the LOC in the latest earlier snapshot in `stats/`. Until there's an earlier snapshot to compare against (the first day), it shows `—`.
 
 ### Quiet days
 

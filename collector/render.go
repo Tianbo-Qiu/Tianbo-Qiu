@@ -136,6 +136,9 @@ func render(s *Snapshot, now time.Time, t theme) string {
 	y += 4
 	totalRow := func(name string, loc, delta int, langs map[string]int, weight string) {
 		arrow, color := deltaLabel(delta, t)
+		if s.Baseline == "" {
+			arrow, color = "—", t.faint // nothing to compare against yet
+		}
 		w(`<text x="%d" y="%d" font-weight="%s">%s</text>`, left, y, weight, esc(truncate(name)))
 		w(`<text x="290" y="%d" text-anchor="end" font-weight="%s">%s LOC</text>`, y, weight, comma(loc))
 		w(`<text x="316" y="%d" font-weight="%s" fill="%s">%s</text>`, y, weight, color, arrow)
@@ -241,7 +244,7 @@ func deltaLabel(n int, t theme) (string, string) {
 	case n < 0:
 		return "↓ −" + comma(-n), t.del
 	default:
-		return "→ 0", t.faint
+		return "no change", t.faint
 	}
 }
 

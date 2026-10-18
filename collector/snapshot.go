@@ -15,6 +15,7 @@ import (
 type Snapshot struct {
 	Date       string       `json:"date"`
 	UpdatedAt  time.Time    `json:"updated_at"`
+	Baseline   string       `json:"baseline,omitempty"` // date LOC deltas compare against; empty on the first day
 	Repos      []RepoStats  `json:"repos"`
 	LastActive *DayActivity `json:"last_active,omitempty"`
 }

@@ -54,6 +54,9 @@ func main() {
 	}
 
 	snap := &Snapshot{Date: today, UpdatedAt: now}
+	if prev != nil {
+		snap.Baseline = prev.Date
+	}
 	history := map[string][]commit{}
 	for _, repo := range repos {
 		log.Printf("collecting %s", repo)
