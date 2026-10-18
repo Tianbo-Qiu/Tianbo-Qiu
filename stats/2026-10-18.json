@@ -1,18 +1,17 @@
 {
   "date": "2026-10-18",
-  "updated_at": "2026-10-18T16:35:07.156206079-07:00",
+  "updated_at": "2026-10-18T16:47:45.414398098-07:00",
   "repos": [
     {
       "name": "whoopctl",
-      "commits": 1,
-      "additions": 20,
+      "commits": 0,
+      "additions": 0,
       "deletions": 0,
-      "loc": 7956,
+      "loc": 7938,
       "loc_delta": 0,
       "languages": {
         "Go": 7740,
-        "Markdown": 198,
-        "YAML": 18
+        "Markdown": 198
       }
     },
     {
