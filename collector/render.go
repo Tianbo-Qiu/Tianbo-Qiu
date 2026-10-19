@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"html"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -36,21 +37,28 @@ const (
 	right = 800
 
 	nameMax = 16 // chars that fit the name column
-	barX    = 186
-	barW    = 330
 )
+
+// Right edges of the today table's added / removed / net / commits columns.
+var colRight = [4]int{right - 360, right - 240, right - 120, right}
 
 func render(s *Snapshot, now time.Time, t theme) string {
 	var b strings.Builder
 	w := func(format string, a ...any) { fmt.Fprintf(&b, format, a...) }
 
-	var touched []RepoStats
+	// Most active today first (lines added + removed), then largest.
+	repos := slices.Clone(s.Repos)
+	sort.SliceStable(repos, func(i, j int) bool {
+		ai, aj := repos[i].Additions+repos[i].Deletions, repos[j].Additions+repos[j].Deletions
+		if ai != aj {
+			return ai > aj
+		}
+		return repos[i].LOC > repos[j].LOC
+	})
+
 	var add, del, commits, loc, locDelta int
 	langs := map[string]int{}
-	for _, r := range s.Repos {
-		if r.Commits > 0 {
-			touched = append(touched, r)
-		}
+	for _, r := range repos {
 		add += r.Additions
 		del += r.Deletions
 		commits += r.Commits
@@ -67,33 +75,38 @@ func render(s *Snapshot, now time.Time, t theme) string {
 			left, y, t.muted, t.faint, label)
 	}
 
-	// Today: date line and the four big numbers.
+	// Today: a table whose columns line up from the totals row down to each repo.
 	y := 52
 	heading(y, "TODAY")
 	w(`<text x="%d" y="%d" text-anchor="end" font-size="12" letter-spacing="1" fill="%s">%s</text>`,
 		right, y, t.muted, strings.ToUpper(now.Format("Mon 2006.01.02")))
 
-	y += 52
-	big := []struct{ val, label, color string }{
-		{"+" + comma(add), "added", t.add},
-		{"−" + comma(del), "removed", t.del},
-		{signed(add - del), "net", t.fg},
-		{comma(commits), "commits", t.fg},
+	cell := func(col, y int, attrs, color, val string) {
+		w(`<text x="%d" y="%d" text-anchor="end" %s fill="%s">%s</text>`, colRight[col], y, attrs, color, val)
 	}
-	for i, n := range big {
-		color := n.color
-		if quiet {
-			color = t.faint
-		}
-		x := left + i*190
-		w(`<text x="%d" y="%d" font-size="30" font-weight="700" fill="%s">%s</text>`, x, y, color, n.val)
-		w(`<text x="%d" y="%d" font-size="12" fill="%s">%s</text>`, x, y+22, t.muted, n.label)
-	}
-	y += 22
 
-	// Today: per-repo rows, or the quiet-day box.
+	y += 40
+	for i, label := range []string{"added", "removed", "net", "commits"} {
+		cell(i, y, `font-size="12"`, t.muted, label)
+	}
+
+	y += 38
+	w(`<text x="%d" y="%d" font-size="12" letter-spacing="1.4" fill="%s">ALL REPOS</text>`, left, y, t.muted)
+	bigColor := func(c string) string {
+		if quiet {
+			return t.faint
+		}
+		return c
+	}
+	const bigAttrs = `font-size="28" font-weight="700"`
+	cell(0, y, bigAttrs, bigColor(t.add), "+"+comma(add))
+	cell(1, y, bigAttrs, bigColor(t.del), "−"+comma(del))
+	cell(2, y, bigAttrs, bigColor(t.fg), signed(add-del))
+	cell(3, y, bigAttrs, bigColor(t.fg), comma(commits))
+
+	// Per-repo rows, or the quiet-day box.
 	if quiet {
-		top := y + 26
+		top := y + 24
 		w(`<rect x="%d" y="%d" width="%d" height="66" rx="8" fill="none" stroke="%s" stroke-dasharray="4 4"/>`,
 			left, top, right-left, t.border)
 		w(`<text x="%d" y="%d">Quiet day. No commits yet.</text>`, left+16, top+27)
@@ -107,25 +120,19 @@ func render(s *Snapshot, now time.Time, t theme) string {
 		}
 		y = top + 66 + 26
 	} else {
-		maxTotal := 1
-		for _, r := range touched {
-			maxTotal = max(maxTotal, r.Additions+r.Deletions)
-		}
-		y += 14
-		for i, r := range touched {
-			y += 28
-			addW := barW * r.Additions / maxTotal
-			delW := barW * r.Deletions / maxTotal
+		y += 4
+		for _, r := range repos {
+			if r.Commits == 0 {
+				continue
+			}
+			y += 30
 			w(`<text x="%d" y="%d">%s</text>`, left, y, esc(truncate(r.Name)))
-			w(`<clipPath id="today%d"><rect x="%d" y="%d" width="%d" height="6" rx="3"/></clipPath>`, i, barX, y-9, barW)
-			w(`<g clip-path="url(#today%d)"><rect x="%d" y="%d" width="%d" height="6" fill="%s"/>`, i, barX, y-9, barW, t.track)
-			w(`<rect x="%d" y="%d" width="%d" height="6" fill="%s"/>`, barX, y-9, addW, t.add)
-			w(`<rect x="%d" y="%d" width="%d" height="6" fill="%s"/></g>`, barX+addW, y-9, delW, t.del)
-			w(`<text x="616" y="%d" text-anchor="end" fill="%s">+%s</text>`, y, t.add, comma(r.Additions))
-			w(`<text x="696" y="%d" text-anchor="end" fill="%s">−%s</text>`, y, t.del, comma(r.Deletions))
-			w(`<text x="%d" y="%d" text-anchor="end" fill="%s">%s</text>`, right, y, t.muted, plural(r.Commits, "commit"))
+			cell(0, y, "", ifZero(r.Additions, t.faint, t.add), "+"+comma(r.Additions))
+			cell(1, y, "", ifZero(r.Deletions, t.faint, t.del), "−"+comma(r.Deletions))
+			cell(2, y, "", t.fg, signed(r.Additions-r.Deletions))
+			cell(3, y, "", t.fg, comma(r.Commits))
 		}
-		y += 24
+		y += 26
 	}
 
 	w(`<line x1="%d" y1="%d" x2="%d" y2="%d" stroke="%s"/>`, left, y, right, y, t.line)
@@ -142,9 +149,9 @@ func render(s *Snapshot, now time.Time, t theme) string {
 		w(`<text x="%d" y="%d" font-weight="%s">%s</text>`, left, y, weight, esc(truncate(name)))
 		w(`<text x="290" y="%d" text-anchor="end" font-weight="%s">%s LOC</text>`, y, weight, comma(loc))
 		w(`<text x="316" y="%d" font-weight="%s" fill="%s">%s</text>`, y, weight, color, arrow)
-		w(`<text x="446" y="%d" font-size="12" fill="%s">%s</text>`, y, t.muted, esc(shareText(shares(langs))))
+		w(`<text x="%d" y="%d" text-anchor="end" font-size="12" fill="%s">%s</text>`, right, y, t.muted, esc(shareText(shares(langs))))
 	}
-	for _, r := range s.Repos {
+	for _, r := range repos {
 		y += 28
 		totalRow(r.Name, r.LOC, r.LOCDelta, r.Languages, "400")
 	}
@@ -246,6 +253,13 @@ func deltaLabel(n int, t theme) (string, string) {
 	default:
 		return "no change", t.faint
 	}
+}
+
+func ifZero(n int, zero, other string) string {
+	if n == 0 {
+		return zero
+	}
+	return other
 }
 
 func comma(n int) string {
