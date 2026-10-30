@@ -1,0 +1,44 @@
+{
+  "date": "2026-10-30",
+  "updated_at": "2026-10-30T06:39:20.23741959-07:00",
+  "baseline": "2026-10-29",
+  "repos": [
+    {
+      "name": "whoopctl",
+      "commits": 0,
+      "additions": 0,
+      "deletions": 0,
+      "loc": 7956,
+      "loc_delta": 0,
+      "languages": {
+        "Go": 7740,
+        "Markdown": 198,
+        "YAML": 18
+      }
+    },
+    {
+      "name": "noosphere",
+      "commits": 0,
+      "additions": 0,
+      "deletions": 0,
+      "loc": 7777,
+      "loc_delta": 0,
+      "languages": {
+        "CSS": 69,
+        "Go": 3104,
+        "HTML": 59,
+        "JavaScript": 3095,
+        "Makefile": 59,
+        "Markdown": 1054,
+        "SQL": 99,
+        "YAML": 238
+      }
+    }
+  ],
+  "last_active": {
+    "date": "2026-10-26",
+    "repo": "noosphere",
+    "additions": 294,
+    "deletions": 32
+  }
+}
