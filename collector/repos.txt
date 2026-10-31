@@ -1,3 +1,4 @@
 # Repos counted by the profile widget, one owner/name per line.
 Tianbo-Qiu/whoopctl
 Tianbo-Qiu/noosphere
+Tianbo-Qiu/build
