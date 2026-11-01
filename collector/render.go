@@ -12,7 +12,7 @@ import (
 
 type theme struct {
 	bg, border, fg, muted, faint string
-	add, del, line, track, brass string
+	add, del, line, track        string
 	langs                        []string // colors for the top languages
 	other                        string
 }
@@ -21,12 +21,12 @@ type theme struct {
 var (
 	darkTheme = theme{
 		bg: "#0d1117", border: "#30363d", fg: "#e6edf3", muted: "#8b949e", faint: "#6e7681",
-		add: "#3fb950", del: "#f85149", line: "#21262d", track: "#21262d", brass: "#d4a85a",
+		add: "#3fb950", del: "#f85149", line: "#21262d", track: "#21262d",
 		langs: []string{"#58a6ff", "#d29922", "#a371f7"}, other: "#6e7681",
 	}
 	lightTheme = theme{
 		bg: "#ffffff", border: "#d0d7de", fg: "#1f2328", muted: "#59636e", faint: "#818b98",
-		add: "#1a7f37", del: "#cf222e", line: "#d8dee4", track: "#eaeef2", brass: "#9a6700",
+		add: "#1a7f37", del: "#cf222e", line: "#d8dee4", track: "#eaeef2",
 		langs: []string{"#0969da", "#bf8700", "#8250df"}, other: "#818b98",
 	}
 )
@@ -177,8 +177,7 @@ func render(s *Snapshot, now time.Time, t theme) string {
 
 	// Footer.
 	y += 6 + 40
-	w(`<text x="%d" y="%d" font-size="12" font-weight="700" letter-spacing="2.9" fill="%s">FOR THE EMPEROR</text>`,
-		left, y, t.brass)
+	b.WriteString(aiMarks(left, y, t))
 	w(`<text x="%d" y="%d" text-anchor="end" font-size="12" fill="%s">updated %s PT · %s</text>`,
 		right, y, t.faint, now.Format("15:04"), now.Format("Jan 2"))
 	height := y + 32
@@ -192,6 +191,28 @@ func render(s *Snapshot, now time.Time, t theme) string {
 %s</g>
 </svg>
 `, width, height, width, height, title, width-1, height-1, t.bg, t.border, t.fg, b.String())
+}
+
+// aiMarks draws a row of AI brand marks starting at x, vertically centered
+// on 12px text whose baseline is y.
+func aiMarks(x, y int, t theme) string {
+	const size, gap = 18, 14
+	var b strings.Builder
+	for _, l := range aiLogos {
+		fill, w, h, view := t.fg, size, size, "0 0 24 24"
+		switch l.name {
+		case "Claude":
+			// The Claude Code mascot is 24x15 inside its square viewBox; crop
+			// to it and give it a wider slot so it matches the others' weight.
+			fill, w, h, view = "#d97757", 24, 15, "0 5 24 15"
+		case "DeepSeek":
+			fill = "#4d6bfe"
+		}
+		fmt.Fprintf(&b, `<svg x="%d" y="%d" width="%d" height="%d" viewBox="%s"><title>%s</title><path d="%s" fill="%s" fill-rule="evenodd"/></svg>`,
+			x, y-4-h/2, w, h, view, l.name, l.path, fill)
+		x += w + gap
+	}
+	return b.String()
 }
 
 type share struct {
