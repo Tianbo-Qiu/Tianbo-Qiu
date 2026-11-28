@@ -1,10 +1,13 @@
-// Command collector computes daily code activity for the repos in repos.txt,
-// writes a snapshot to stats/YYYY-MM-DD.json and renders the profile widget
-// to assets/code-report.svg, with token totals from stats/tokens.json.
+// Command collector reads code activity from the repos listed in
+// $CODE_STATS_REPOS and renders the profile widget to assets/code-report.svg,
+// with token totals from stats/tokens.json. It writes nothing else: every
+// number comes from git.
+//
+// The repo list lives outside this public repo (an Actions variable in CI) and
+// is never logged, so tracking a private repo doesn't reveal its name.
 package main
 
 import (
-	"bufio"
 	"flag"
 	"fmt"
 	"log"
@@ -13,6 +16,7 @@ import (
 	"strings"
 	"time"
 	_ "time/tzdata" // day boundaries must not depend on the runner's zoneinfo
+	"unicode"
 
 	"github.com/Tianbo-Qiu/Tianbo-Qiu/collector/tokenlog"
 )
@@ -36,12 +40,12 @@ func main() {
 		now = t.In(loc)
 	}
 	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
-	today := dayStart.Format(time.DateOnly)
 
-	repos, err := readRepoList(filepath.Join(*root, "collector", "repos.txt"))
+	repos, err := parseRepoList(os.Getenv(reposEnv))
 	if err != nil {
 		log.Fatal(err)
 	}
+	maskInActionsLogs(repos)
 
 	work, err := os.MkdirTemp("", "code-stats-")
 	if err != nil {
@@ -49,60 +53,22 @@ func main() {
 	}
 	defer os.RemoveAll(work)
 
-	statsDir := filepath.Join(*root, "stats")
-	prev, err := loadPrevious(statsDir, today)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	snap := &Snapshot{Date: today, UpdatedAt: now}
-	if prev != nil {
-		snap.Baseline = prev.Date
-	}
-	history := map[string][]commit{}
-	for _, repo := range repos {
-		log.Printf("collecting %s", repo)
-		dir, err := cloneRepo(work, repo)
+	data := map[string]*repoData{}
+	for i, repo := range repos {
+		log.Printf("collecting repo %d of %d", i+1, len(repos))
+		d, err := collect(work, repo, dayStart, now)
 		if err != nil {
-			log.Fatal(err)
+			log.Fatalf("repo %d: %v", i+1, err)
 		}
-		commits, err := readCommits(dir)
-		if err != nil {
-			log.Fatal(err)
-		}
-		langs, err := countLines(dir)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		name := repoName(repo)
-		history[name] = commits
-		r := RepoStats{Name: name, Languages: langs}
-		for _, c := range commits {
-			if !c.at.Before(dayStart) && !c.at.After(now) {
-				r.Commits++
-				r.Additions += c.add
-				r.Deletions += c.del
-			}
-		}
-		for _, n := range langs {
-			r.LOC += n
-		}
-		r.LOCDelta = locDelta(prev, name, r.LOC)
-		snap.Repos = append(snap.Repos, r)
-	}
-	snap.LastActive = lastActivity(history, dayStart, loc)
-
-	if err := saveSnapshot(statsDir, snap); err != nil {
-		log.Fatal(err)
+		data[repo] = d
 	}
 
-	tokens, err := tokenlog.Load(filepath.Join(statsDir, "tokens.json"))
+	tokens, err := tokenlog.Load(filepath.Join(*root, "stats", "tokens.json"))
 	if err != nil {
 		log.Fatal(err)
 	}
 	owner, _, _ := strings.Cut(repos[0], "/")
-	report := buildReport(snap, history, tokens, now, loc, owner)
+	report := buildReport(data, tokens, now, loc, owner)
 
 	assets := filepath.Join(*root, "assets")
 	if err := os.MkdirAll(assets, 0o755); err != nil {
@@ -111,75 +77,68 @@ func main() {
 	if err := os.WriteFile(filepath.Join(assets, "code-report.svg"), []byte(render(report)), 0o644); err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("wrote snapshot %s and assets/code-report.svg", today)
+	log.Printf("wrote assets/code-report.svg")
 }
 
-// readRepoList reads owner/name lines, skipping blanks and # comments.
-func readRepoList(path string) ([]string, error) {
-	f, err := os.Open(path)
+// collect clones one repo and reads its commits and its lines of code now and
+// at the start of today.
+func collect(work, repo string, dayStart, now time.Time) (*repoData, error) {
+	dir, err := cloneRepo(work, repo)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
-
-	var repos []string
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		if strings.Count(line, "/") != 1 {
-			return nil, fmt.Errorf("%s: %q is not owner/name", path, line)
-		}
-		repos = append(repos, line)
-	}
-	if err := sc.Err(); err != nil {
+	d := &repoData{}
+	if d.commits, err = readCommits(dir); err != nil {
 		return nil, err
 	}
+	if d.langs, err = linesAt(dir, now); err != nil {
+		return nil, err
+	}
+	if d.before, err = linesAt(dir, dayStart); err != nil {
+		return nil, err
+	}
+	return d, nil
+}
+
+// linesAt counts lines of code per language as the default branch stood at t.
+func linesAt(dir string, t time.Time) (map[string]int, error) {
+	rev, err := revAt(dir, t)
+	if err != nil {
+		return nil, err
+	}
+	return countLines(dir, rev)
+}
+
+// reposEnv names the variable holding the repos to count: owner/name entries
+// separated by spaces, commas or newlines.
+const reposEnv = "CODE_STATS_REPOS"
+
+func parseRepoList(s string) ([]string, error) {
+	var repos []string
+	seen := map[string]bool{}
+	for _, r := range strings.FieldsFunc(s, func(c rune) bool { return c == ',' || unicode.IsSpace(c) }) {
+		if strings.Count(r, "/") != 1 || strings.HasPrefix(r, "/") || strings.HasSuffix(r, "/") {
+			return nil, fmt.Errorf("%s: entry %d is not owner/name", reposEnv, len(repos)+1)
+		}
+		if !seen[r] {
+			seen[r] = true
+			repos = append(repos, r)
+		}
+	}
 	if len(repos) == 0 {
-		return nil, fmt.Errorf("%s: no repos listed", path)
+		return nil, fmt.Errorf("%s is empty: set it to the repos to count, e.g. owner/a,owner/b", reposEnv)
 	}
 	return repos, nil
 }
 
-func repoName(repo string) string {
-	_, name, _ := strings.Cut(repo, "/")
-	return name
-}
-
-// lastActivity finds the most recent day before dayStart with commits and
-// reports the busiest repo on that day, for the quiet-day line.
-func lastActivity(history map[string][]commit, dayStart time.Time, loc *time.Location) *DayActivity {
-	var latest time.Time
-	for _, commits := range history {
-		for _, c := range commits {
-			if c.at.Before(dayStart) && c.at.After(latest) {
-				latest = c.at
-			}
-		}
+// maskInActionsLogs tells GitHub Actions to hide each repo's full and short
+// name wherever it would appear in the log, including git's error messages.
+func maskInActionsLogs(repos []string) {
+	if os.Getenv("GITHUB_ACTIONS") != "true" {
+		return
 	}
-	if latest.IsZero() {
-		return nil
+	for _, r := range repos {
+		_, name, _ := strings.Cut(r, "/")
+		fmt.Printf("::add-mask::%s\n::add-mask::%s\n", r, name)
 	}
-
-	l := latest.In(loc)
-	start := time.Date(l.Year(), l.Month(), l.Day(), 0, 0, 0, 0, loc)
-	end := start.AddDate(0, 0, 1)
-	var best *DayActivity
-	for name, commits := range history {
-		a := DayActivity{Date: start.Format(time.DateOnly), Repo: name}
-		for _, c := range commits {
-			if !c.at.Before(start) && c.at.Before(end) {
-				a.Additions += c.add
-				a.Deletions += c.del
-			}
-		}
-		total := a.Additions + a.Deletions
-		if best == nil || total > best.Additions+best.Deletions ||
-			(total == best.Additions+best.Deletions && name < best.Repo) {
-			best = &a
-		}
-	}
-	return best
 }

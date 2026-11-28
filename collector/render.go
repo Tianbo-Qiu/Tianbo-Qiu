@@ -311,8 +311,6 @@ func otherNames(names []string) string {
 
 func deltaText(r *Report) string {
 	switch {
-	case !r.HasBaseline:
-		return ""
 	case r.LOCDelta > 0:
 		return " · ↑ " + comma(r.LOCDelta) + " TODAY"
 	case r.LOCDelta < 0:

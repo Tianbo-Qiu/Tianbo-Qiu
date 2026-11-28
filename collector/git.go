@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -106,43 +108,87 @@ func numstatPath(p string) string {
 	return p
 }
 
-// countLines counts non-blank lines per language over tracked files.
-func countLines(dir string) (map[string]int, error) {
-	out, err := runGit(dir, "ls-files", "-z")
+// revAt returns the default branch's commit as of t (the last commit on its
+// first-parent line committed at or before t), or "" if there was none yet.
+func revAt(dir string, t time.Time) (string, error) {
+	out, err := runGit(dir, "rev-list", "-1", "--first-parent", "--before="+t.Format(time.RFC3339), "HEAD")
+	return strings.TrimSpace(out), err
+}
+
+// countLines counts non-blank lines per language in the files tracked at rev,
+// read from git's object store so any past commit can be counted. An empty
+// rev counts nothing.
+func countLines(dir, rev string) (map[string]int, error) {
+	langs := map[string]int{}
+	if rev == "" {
+		return langs, nil
+	}
+	out, err := runGit(dir, "ls-tree", "-r", "-z", rev)
 	if err != nil {
 		return nil, err
 	}
 
-	langs := map[string]int{}
-	for _, p := range strings.Split(out, "\x00") {
-		if p == "" || excluded(p) {
+	// Each entry is "<mode> <type> <object>\t<path>". Only regular files count:
+	// symlinks (120000) and submodules (160000) are skipped.
+	var objects, fileLangs []string
+	for _, entry := range strings.Split(out, "\x00") {
+		meta, path, ok := strings.Cut(entry, "\t")
+		f := strings.Fields(meta)
+		if !ok || len(f) != 3 || (f[0] != "100644" && f[0] != "100755") || excluded(path) {
 			continue
 		}
-		lang := languageOf(p)
-		if lang == "" {
-			continue
+		if lang := languageOf(path); lang != "" {
+			objects = append(objects, f[2])
+			fileLangs = append(fileLangs, lang)
 		}
-		full := filepath.Join(dir, p)
-		info, err := os.Lstat(full)
-		if err != nil || !info.Mode().IsRegular() {
-			continue
-		}
-		data, err := os.ReadFile(full)
+	}
+	if len(objects) == 0 {
+		return langs, nil
+	}
+
+	cmd := exec.Command("git", "cat-file", "--batch")
+	cmd.Dir = dir
+	cmd.Stdin = strings.NewReader(strings.Join(objects, "\n") + "\n")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	r := bufio.NewReader(stdout)
+	for _, lang := range fileLangs {
+		// "<object> blob <size>\n<content>\n"
+		header, err := r.ReadString('\n')
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("git cat-file: %w: %s", err, strings.TrimSpace(stderr.String()))
 		}
-		if bytes.IndexByte(data, 0) >= 0 {
+		f := strings.Fields(header)
+		if len(f) != 3 || f[1] != "blob" {
+			return nil, fmt.Errorf("git cat-file: unexpected header %q", header)
+		}
+		size, err := strconv.Atoi(f[2])
+		if err != nil {
+			return nil, fmt.Errorf("git cat-file: bad size in %q", header)
+		}
+		data := make([]byte, size+1) // content plus the trailing newline
+		if _, err := io.ReadFull(r, data); err != nil {
+			return nil, fmt.Errorf("git cat-file: %w", err)
+		}
+		data = data[:size]
+		if bytes.IndexByte(data, 0) >= 0 { // binary
 			continue
 		}
-		n := 0
 		for _, l := range bytes.Split(data, []byte("\n")) {
 			if len(bytes.TrimSpace(l)) > 0 {
-				n++
+				langs[lang]++
 			}
 		}
-		if n > 0 {
-			langs[lang] += n
-		}
+	}
+	if err := cmd.Wait(); err != nil {
+		return nil, fmt.Errorf("git cat-file: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 	return langs, nil
 }

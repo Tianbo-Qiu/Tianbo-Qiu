@@ -19,15 +19,23 @@ func pacific(t *testing.T) *time.Location {
 	return loc
 }
 
-func testSnapshot() *Snapshot {
-	return &Snapshot{
-		Date:     "2026-11-27",
-		Baseline: "2026-11-26",
-		Repos: []RepoStats{
-			{Name: "a", LOC: 1000, LOCDelta: 40, Languages: map[string]int{"Go": 700, "Markdown": 200, "YAML": 60, "SQL": 40}},
-			{Name: "b", LOC: 500, Languages: map[string]int{"JavaScript": 500}},
+// testRepos gives repos a and b 1,500 lines between them, 40 of them added
+// today, plus the given commits.
+func testRepos(history map[string][]commit) map[string]*repoData {
+	repos := map[string]*repoData{
+		"a": {
+			langs:  map[string]int{"Go": 700, "Markdown": 200, "YAML": 60, "SQL": 40},
+			before: map[string]int{"Go": 660, "Markdown": 200, "YAML": 60, "SQL": 40},
+		},
+		"b": {
+			langs:  map[string]int{"JavaScript": 500},
+			before: map[string]int{"JavaScript": 500},
 		},
 	}
+	for name, commits := range history {
+		repos[name].commits = commits
+	}
+	return repos
 }
 
 func TestBuildReportShowsLastActiveDayWhenTodayIsQuiet(t *testing.T) {
@@ -50,7 +58,7 @@ func TestBuildReportShowsLastActiveDayWhenTodayIsQuiet(t *testing.T) {
 		"2026-11-01": {Output: 3},
 	}}
 
-	r := buildReport(testSnapshot(), history, tok, now, loc, "me")
+	r := buildReport(testRepos(history), tok, now, loc, "me")
 
 	want := DayStat{Date: "2026-11-25", Add: 16, Del: 3, Commits: 3, Files: 3}
 	if r.Shown != want || r.ShownToday {
@@ -62,7 +70,7 @@ func TestBuildReportShowsLastActiveDayWhenTodayIsQuiet(t *testing.T) {
 	if r.Tokens.Total() != 103 || r.TokensSince != "2026-11-01" {
 		t.Errorf("Tokens = %+v since %s", r.Tokens, r.TokensSince)
 	}
-	if r.Commits != 4 || r.LOC != 1500 || r.LOCDelta != 40 || r.Repos != 2 || !r.HasBaseline {
+	if r.Commits != 4 || r.LOC != 1500 || r.LOCDelta != 40 || r.Repos != 2 {
 		t.Errorf("totals: commits %d loc %d delta %d repos %d", r.Commits, r.LOC, r.LOCDelta, r.Repos)
 	}
 	if len(r.Days) != 30 || r.Days[0].Date != "2026-10-29" || r.Days[29].Date != "2026-11-27" {
@@ -80,7 +88,7 @@ func TestBuildReportPrefersTodayOnceItHasCommits(t *testing.T) {
 		{at: time.Date(2026, 11, 27, 0, 30, 0, 0, loc), add: 3, paths: []string{"a.go"}},
 		{at: time.Date(2026, 11, 26, 12, 0, 0, 0, loc), add: 50, paths: []string{"b.go"}},
 	}}
-	r := buildReport(testSnapshot(), history, nil, now, loc, "me")
+	r := buildReport(testRepos(history), nil, now, loc, "me")
 	if !r.ShownToday || r.Shown.Add != 3 || r.Tokens != nil || r.ShownTokens != nil {
 		t.Errorf("Shown = %+v today=%v tokens=%v", r.Shown, r.ShownToday, r.Tokens)
 	}
@@ -105,8 +113,8 @@ func TestRenderIsWellFormedXML(t *testing.T) {
 	history := map[string][]commit{"a": {{at: now.Add(-time.Hour), add: 346, paths: []string{"a.go"}}}}
 	tok := &tokenlog.File{Days: map[string]tokenlog.Counts{"2026-11-27": {Input: 1, Output: 2, CacheWrite: 3, CacheRead: 400}}}
 	for _, r := range []*Report{
-		buildReport(testSnapshot(), history, tok, now, loc, "me"),
-		buildReport(&Snapshot{Date: "2026-11-27"}, nil, nil, now, loc, "me"), // no data at all
+		buildReport(testRepos(history), tok, now, loc, "me"),
+		buildReport(nil, nil, now, loc, "me"), // no data at all
 	} {
 		svg := render(r)
 		dec := xml.NewDecoder(strings.NewReader(svg))
@@ -118,6 +126,18 @@ func TestRenderIsWellFormedXML(t *testing.T) {
 			if err != nil {
 				t.Fatalf("render produced bad XML: %v", err)
 			}
+		}
+	}
+}
+
+func TestParseRepoList(t *testing.T) {
+	got, err := parseRepoList(" me/a,me/b\nme/c  me/a\n")
+	if err != nil || strings.Join(got, " ") != "me/a me/b me/c" {
+		t.Errorf("got %v, %v", got, err)
+	}
+	for _, bad := range []string{"", " \n", "me", "me/a/b", "/a", "me/"} {
+		if _, err := parseRepoList(bad); err == nil {
+			t.Errorf("parseRepoList(%q) accepted", bad)
 		}
 	}
 }

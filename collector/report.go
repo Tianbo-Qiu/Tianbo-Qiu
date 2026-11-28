@@ -7,6 +7,13 @@ import (
 	"github.com/Tianbo-Qiu/Tianbo-Qiu/collector/tokenlog"
 )
 
+// repoData is what the collector reads from one tracked repo.
+type repoData struct {
+	commits []commit
+	langs   map[string]int // lines of code per language now
+	before  map[string]int // the same at the start of today
+}
+
 // DayStat is one day's activity across all tracked repos.
 type DayStat struct {
 	Date     string // YYYY-MM-DD
@@ -33,11 +40,10 @@ type Report struct {
 	ShownToday  bool             //
 	ShownTokens *tokenlog.Counts // tokens recorded for the shown day, if any
 
-	LOC         int
-	LOCDelta    int  // vs. the previous snapshot
-	HasBaseline bool // false on the very first run: no delta to show
-	Repos       int
-	Commits     int // all time
+	LOC      int
+	LOCDelta int // since the start of today
+	Repos    int
+	Commits  int // all time
 
 	Days  []DayStat // the last 30 days, oldest first, ending today
 	Langs []LangRow
@@ -51,16 +57,16 @@ const (
 	topLangs   = 3
 )
 
-func buildReport(snap *Snapshot, history map[string][]commit, tokens *tokenlog.File, now time.Time, loc *time.Location, owner string) *Report {
-	r := &Report{Now: now, Owner: owner, Repos: len(snap.Repos), HasBaseline: snap.Baseline != ""}
+func buildReport(repos map[string]*repoData, tokens *tokenlog.File, now time.Time, loc *time.Location, owner string) *Report {
+	r := &Report{Now: now, Owner: owner, Repos: len(repos)}
 
 	type acc struct {
 		DayStat
 		files map[string]bool
 	}
 	byDay := map[string]*acc{}
-	for repo, commits := range history {
-		for _, c := range commits {
+	for repo, d := range repos {
+		for _, c := range d.commits {
 			if c.at.After(now) {
 				continue
 			}
@@ -110,13 +116,16 @@ func buildReport(snap *Snapshot, history map[string][]commit, tokens *tokenlog.F
 	}
 
 	langs := map[string]int{}
-	for _, repo := range snap.Repos {
-		r.LOC += repo.LOC
-		r.LOCDelta += repo.LOCDelta
-		for l, n := range repo.Languages {
+	for _, d := range repos {
+		for l, n := range d.langs {
 			langs[l] += n
+			r.LOC += n
+		}
+		for _, n := range d.before {
+			r.LOCDelta -= n
 		}
 	}
+	r.LOCDelta += r.LOC
 	r.Langs = langRows(langs)
 
 	if tokens != nil && len(tokens.Days) > 0 {
