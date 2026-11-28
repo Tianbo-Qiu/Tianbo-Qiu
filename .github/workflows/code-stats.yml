@@ -33,7 +33,7 @@ jobs:
       - name: Collect stats and render widget
         working-directory: collector
         env:
-          CODE_STATS_REPOS: ${{ vars.CODE_STATS_REPOS }}    # repos to count (Settings → Variables)
+          CODE_STATS_REPOS: ${{ secrets.CODE_STATS_REPOS }} # repos to count; a secret so the log shows ***
           CODE_STATS_TOKEN: ${{ secrets.CODE_STATS_TOKEN }} # read access to private repos
         run: go run . -root ..
 

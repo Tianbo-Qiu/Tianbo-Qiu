@@ -58,20 +58,19 @@ The bot commits to `main` on every run. **Pull before you push** to this repo.
 
 ## Which repos are counted
 
-The list lives in the Actions **variable** `CODE_STATS_REPOS` (repo Settings → Secrets and variables → Actions → Variables), not in a file, so this public repo never names the repos it counts. Variables are visible only to people with access to the repo's settings. Entries are `owner/name`, separated by commas, spaces or newlines. The collector logs repos by number ("repo 2 of 3") and tells Actions to mask every name, so they don't appear in the public run logs either, even in a clone error.
+The list lives in the Actions **secret** `CODE_STATS_REPOS`, not in a file, so this public repo never names the repos it counts. It's a secret rather than a variable because Actions prints a step's variables at the top of its public log, while secrets show as `***`. Entries are `owner/name`, separated by commas, spaces or newlines. The collector logs repos by number ("repo 2 of 3") and tells Actions to mask every name, so they don't appear in the run logs either, even in a clone error.
 
-Every repo on the list is counted, public or private. Private ones are cloned with the Actions secret `CODE_STATS_TOKEN`: a fine-grained token with **Contents: Read-only**, set here to all of the owner's repos so any repo can be added without touching the token. The collector passes it to `git clone` as an auth header through git's environment config, so it never appears in the command line or logs. Without the secret, public repos still work.
+Every repo on the list is counted the same way, public or private: making a repo private later needs no change here. Private ones are cloned with the Actions secret `CODE_STATS_TOKEN`: a fine-grained token with **Contents: Read-only**, set here to all of the owner's repos so any repo can be added without touching the token. The collector passes it to `git clone` as an auth header through git's environment config, so it never appears in the command line or logs. Without the token, or if GitHub rejects it (expired, revoked), public repos are cloned without it and still counted; only private ones fail, and the run stops with an error rather than show a card missing a repo. **Renew the token before it expires.**
 
 ## Common tasks
 
-**See or change the repos**:
+**Change the repos**: a secret can't be read back, so set the whole list each time.
 
 ```sh
-gh variable get CODE_STATS_REPOS
-gh variable set CODE_STATS_REPOS --body "Tianbo-Qiu/wheels,Tianbo-Qiu/noosphere,Tianbo-Qiu/whoopctl"
+gh secret set CODE_STATS_REPOS --body "Tianbo-Qiu/wheels,Tianbo-Qiu/noosphere,Tianbo-Qiu/whoopctl"
 ```
 
-Setting it replaces the whole list. The card picks it up on the next run.
+The card picks it up on the next run.
 
 **Update now**: Actions tab → *code stats* → *Run workflow*.
 
@@ -79,7 +78,7 @@ Setting it replaces the whole list. The card picks it up on the next run.
 
 ```sh
 cd collector
-export CODE_STATS_REPOS="$(gh variable get CODE_STATS_REPOS)"
+export CODE_STATS_REPOS="Tianbo-Qiu/wheels,Tianbo-Qiu/noosphere,Tianbo-Qiu/whoopctl"
 go run . -root ..
 ```
 

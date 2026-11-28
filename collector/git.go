@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,21 +26,34 @@ const tokenEnv = "CODE_STATS_TOKEN"
 
 // cloneRepo clones github.com/<repo>. When CODE_STATS_TOKEN is set the token
 // is sent as an auth header through git's environment config, so it never
-// appears in the command line or in error messages.
+// appears in the command line or in error messages. If GitHub rejects the
+// token (expired, revoked), the clone is retried without it, so public repos
+// keep being counted and only private ones fail.
 func cloneRepo(workDir, repo string) (string, error) {
 	dir := filepath.Join(workDir, strings.ReplaceAll(repo, "/", "__"))
-	var env []string
-	if tok := os.Getenv(tokenEnv); tok != "" {
-		auth := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + tok))
-		env = []string{
-			"GIT_CONFIG_COUNT=1",
-			"GIT_CONFIG_KEY_0=http.https://github.com/.extraheader",
-			"GIT_CONFIG_VALUE_0=AUTHORIZATION: basic " + auth,
-		}
+	url := "https://github.com/" + repo + ".git"
+	noPrompt := []string{"GIT_TERMINAL_PROMPT=0"} // fail instead of asking for a password
+
+	tok := os.Getenv(tokenEnv)
+	if tok == "" {
+		_, err := runGitEnv("", noPrompt, "clone", "--quiet", url, dir)
+		return dir, err
 	}
-	if _, err := runGitEnv("", env, "clone", "--quiet", "https://github.com/"+repo+".git", dir); err != nil {
-		return "", err
+	auth := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + tok))
+	withToken := append(noPrompt,
+		"GIT_CONFIG_COUNT=1",
+		"GIT_CONFIG_KEY_0=http.https://github.com/.extraheader",
+		"GIT_CONFIG_VALUE_0=AUTHORIZATION: basic "+auth,
+	)
+	_, tokErr := runGitEnv("", withToken, "clone", "--quiet", url, dir)
+	if tokErr == nil {
+		return dir, nil
 	}
+	os.RemoveAll(dir)
+	if _, err := runGitEnv("", noPrompt, "clone", "--quiet", url, dir); err != nil {
+		return "", tokErr
+	}
+	log.Printf("warning: %s was rejected; cloned without it (public repo)", tokenEnv)
 	return dir, nil
 }
 
