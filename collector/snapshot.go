@@ -73,8 +73,9 @@ func loadPrevious(dir, today string) (*Snapshot, error) {
 	return &s, nil
 }
 
-// locDelta compares against the previous snapshot. With no history at all
-// the delta is 0; a repo that's new since then counts in full.
+// locDelta compares against the previous snapshot. A repo that wasn't in it
+// (just added to repos.txt) has no delta: its existing code wasn't written
+// since yesterday.
 func locDelta(prev *Snapshot, name string, loc int) int {
 	if prev == nil {
 		return 0
@@ -84,7 +85,7 @@ func locDelta(prev *Snapshot, name string, loc int) int {
 			return loc - r.LOC
 		}
 	}
-	return loc
+	return 0
 }
 
 func saveSnapshot(dir string, s *Snapshot) error {

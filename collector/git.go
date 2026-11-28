@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,11 +15,27 @@ import (
 type commit struct {
 	at       time.Time // author date
 	add, del int       // counted lines only (see excluded/languageOf)
+	paths    []string  // counted files the commit touched
 }
 
+// tokenEnv names the variable holding a GitHub token for private repos.
+const tokenEnv = "CODE_STATS_TOKEN"
+
+// cloneRepo clones github.com/<repo>. When CODE_STATS_TOKEN is set the token
+// is sent as an auth header through git's environment config, so it never
+// appears in the command line or in error messages.
 func cloneRepo(workDir, repo string) (string, error) {
 	dir := filepath.Join(workDir, strings.ReplaceAll(repo, "/", "__"))
-	if _, err := runGit("", "clone", "--quiet", "https://github.com/"+repo+".git", dir); err != nil {
+	var env []string
+	if tok := os.Getenv(tokenEnv); tok != "" {
+		auth := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + tok))
+		env = []string{
+			"GIT_CONFIG_COUNT=1",
+			"GIT_CONFIG_KEY_0=http.https://github.com/.extraheader",
+			"GIT_CONFIG_VALUE_0=AUTHORIZATION: basic " + auth,
+		}
+	}
+	if _, err := runGitEnv("", env, "clone", "--quiet", "https://github.com/"+repo+".git", dir); err != nil {
 		return "", err
 	}
 	return dir, nil
@@ -69,6 +86,7 @@ func readCommits(dir string) ([]commit, error) {
 		}
 		commits[cur].add += add
 		commits[cur].del += del
+		commits[cur].paths = append(commits[cur].paths, path)
 	}
 	return commits, nil
 }
@@ -130,8 +148,16 @@ func countLines(dir string) (map[string]int, error) {
 }
 
 func runGit(dir string, args ...string) (string, error) {
+	return runGitEnv(dir, nil, args...)
+}
+
+// runGitEnv runs git with extra environment variables on top of ours.
+func runGitEnv(dir string, env []string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()

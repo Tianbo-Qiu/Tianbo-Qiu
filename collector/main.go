@@ -1,6 +1,6 @@
 // Command collector computes daily code activity for the repos in repos.txt,
 // writes a snapshot to stats/YYYY-MM-DD.json and renders the profile widget
-// to assets/code-stats-{dark,light}.svg.
+// to assets/code-report.svg, with token totals from stats/tokens.json.
 package main
 
 import (
@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 	_ "time/tzdata" // day boundaries must not depend on the runner's zoneinfo
+
+	"github.com/Tianbo-Qiu/Tianbo-Qiu/collector/tokenlog"
 )
 
 func main() {
@@ -95,17 +97,21 @@ func main() {
 		log.Fatal(err)
 	}
 
+	tokens, err := tokenlog.Load(filepath.Join(statsDir, "tokens.json"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	owner, _, _ := strings.Cut(repos[0], "/")
+	report := buildReport(snap, history, tokens, now, loc, owner)
+
 	assets := filepath.Join(*root, "assets")
 	if err := os.MkdirAll(assets, 0o755); err != nil {
 		log.Fatal(err)
 	}
-	for name, t := range map[string]theme{"dark": darkTheme, "light": lightTheme} {
-		path := filepath.Join(assets, fmt.Sprintf("code-stats-%s.svg", name))
-		if err := os.WriteFile(path, []byte(render(snap, now, t)), 0o644); err != nil {
-			log.Fatal(err)
-		}
+	if err := os.WriteFile(filepath.Join(assets, "code-report.svg"), []byte(render(report)), 0o644); err != nil {
+		log.Fatal(err)
 	}
-	log.Printf("wrote snapshot %s and widgets", today)
+	log.Printf("wrote snapshot %s and assets/code-report.svg", today)
 }
 
 // readRepoList reads owner/name lines, skipping blanks and # comments.

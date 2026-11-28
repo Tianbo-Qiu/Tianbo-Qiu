@@ -1,4 +1,5 @@
 # Repos counted by the profile widget, one owner/name per line.
-Tianbo-Qiu/whoopctl
+# Private repos need CODE_STATS_TOKEN (see docs/how-it-works.md).
+Tianbo-Qiu/wheels
 Tianbo-Qiu/noosphere
-Tianbo-Qiu/build
+Tianbo-Qiu/whoopctl

@@ -1,60 +1,71 @@
 # How the profile widget works
 
-The profile README shows two images:
-
-1. **Code activity**: today's lines added/removed per repo plus total LOC per repo. It's rebuilt by a GitHub Action and committed to this repo.
-2. **Visitor count**: a one-line SVG served live by a Cloudflare Worker.
+The profile README shows one image, **the daily code report**: lines added and removed today, total lines of code, the last 30 days, languages, and Claude Code token usage. A GitHub Action rebuilds it and commits it to this repo.
 
 ```
-             every 4h + 23:53 PT                       on every profile view
-                     │                                          │
-       .github/workflows/code-stats.yml          GitHub image proxy (camo)
-                     │                                          │
-        collector/ (Go): clone repos.txt          worker/ (Cloudflare Worker)
-          git log  → today's +/−                     D1: n = n + 1
-          ls-files → LOC per language                 → "1,204 visitors"
-                     │
-     stats/YYYY-MM-DD.json   assets/code-stats-{dark,light}.svg
-                     │
-                 README.md  ◄────────────────────────────────┘
+   every 4h + 23:53 PT,                          daily on the laptop (launchd)
+   and when tokens.json changes                              │
+              │                               collector/cmd/report-tokens
+   .github/workflows/code-stats.yml             ~/.claude/projects/*.jsonl
+              │                                  → tokens per day and type
+   collector/ (Go): clone repos.txt                          │
+     git log  → lines per day                      gh api: PUT stats/tokens.json
+     ls-files → LOC per language                             │
+     stats/tokens.json → tokens  ◄───────────────────────────┘
+              │
+   stats/YYYY-MM-DD.json   assets/code-report.svg
+              │
+          README.md
 ```
 
 ## Layout
 
 | Path | What it is |
 |---|---|
-| `collector/` | Go program that collects stats and renders the SVGs |
+| `collector/` | Go program that collects stats and renders the SVG |
 | `collector/repos.txt` | The repos that are counted, one `owner/name` per line |
-| `stats/` | One JSON snapshot per day. Needed for the `↑ +N` deltas |
-| `assets/code-stats-*.svg` | The widget, in dark and light |
+| `collector/tokenlog/` | Reads Claude Code logs and the `tokens.json` record |
+| `collector/cmd/report-tokens/` | Runs on the laptop; uploads token totals ([README](../collector/cmd/report-tokens/README.md)) |
+| `collector/fonts/` | Barlow Condensed subset inlined into the SVG (SIL OFL) |
+| `stats/YYYY-MM-DD.json` | One snapshot per day. Needed for the LOC change under the total |
+| `stats/tokens.json` | Token counts per day, written by `report-tokens` |
+| `assets/code-report.svg` | The widget |
 | `.github/workflows/code-stats.yml` | Runs the collector and commits the result |
-| `worker/` | Visitor counter (Cloudflare Worker + D1) |
 
-## Code activity
+## What the card shows
 
-### What counts
+- **Today**: lines added and removed, commits and files touched today. Before today's first commit it shows the **last day with commits** instead, labelled `LAST ACTIVE · WED 26 NOV`. The token line is that day's total, once `report-tokens` has recorded it.
+- **Total**: lines of code now, the change since the previous snapshot, repos and all-time commits, and all recorded tokens.
+- **30 days**: one bar per day (lines added + removed), today in red, with the window's totals.
+- **Languages**: the three largest by lines, the rest folded into "Other" (named beside it).
+- **Tokens**: every recorded day, by type, with exact counts and shares. *Cache read* is earlier conversation re-read from the prompt cache on each turn, so it dominates; *cache write* is new context saved to the cache; *output* is Claude's replies and tool calls, thinking included; *input* is uncached prompt text.
+
+No repo names appear on the card, so tracking a private repo shows only its numbers.
+
+## What counts
 
 - **Day** = midnight to now, `America/Los_Angeles`. Every run recomputes the whole day, so running more often never changes what a number means.
 - **Commits** on each repo's **default branch** only, by **author date**, excluding merge commits and authors ending in `[bot]`. Other branches are skipped because they hold unmerged work or build output (`gh-pages`). Work on a feature branch shows up once merged, on the day it was written.
 - **Lines** come from `git log --numstat`, only for files in a known language (`collector/lang.go`). Lockfiles (`go.sum`, `package-lock.json`, …), `vendor/`, `node_modules/`, `dist/` and generated files (`*.pb.go`, `*_gen.go`, `*.min.js`) are ignored.
 - **LOC** = non-blank lines in tracked files on the default branch, using the same language and exclusion rules.
-- **`↑ +N` / `↓ −N` / `no change`** = today's LOC minus the LOC in the latest earlier snapshot in `stats/`. Until there's an earlier snapshot to compare against (the first day), it shows `—`.
+- **`↑ N TODAY`** under the total = LOC minus the LOC in the latest earlier snapshot in `stats/`, over repos present in both. A repo added to `repos.txt` doesn't count toward it on its first day. On the very first run there's nothing to compare against, so it's left out.
+- **Tokens** come from Claude Code's session logs on the laptop, one count per API response (de-duplicated by request ID). See the [report-tokens README](../collector/cmd/report-tokens/README.md).
 
-### Quiet days
+## Schedule
 
-With no commits today, the big numbers are dimmed and a box says "Quiet day. No commits yet." with the most recent day that had commits and the busiest repo on that day.
+The workflow runs every 4 hours (minute 17 UTC), plus at 23:53 Pacific so each day's final numbers are captured. There are two cron lines because GitHub cron is UTC and Pacific shifts with daylight saving. GitHub may start scheduled runs a few minutes late. It also runs whenever `stats/tokens.json` changes on `main`.
 
-### Schedule
+`report-tokens` runs daily at 23:30 on the laptop, so a day's tokens appear that night, just before the 23:53 run.
 
-The workflow runs every 4 hours (minute 17 UTC), plus at 23:53 Pacific so each day's final numbers are captured. There are two cron lines because GitHub cron is UTC and Pacific shifts with daylight saving. GitHub may start scheduled runs a few minutes late.
+The bot commits to `main` on every run. **Pull before you push** to this repo.
 
-It commits only when `stats/` or `assets/` changed. The "updated" timestamp changes on every run, so in practice that's every run. **Pull before you push** to this repo, since the bot commits to `main`.
+## Private repos
 
-No secrets are needed: the tracked repos are public, and the built-in `GITHUB_TOKEN` can push to this repo. To track a **private** repo you'd need a fine-grained token with Contents: read on it, saved as a secret and used for the clone.
+Cloning a private repo needs a token. Create a fine-grained token with **Contents: Read-only** on the private repos in `repos.txt` and save it in this repo as the Actions secret `CODE_STATS_TOKEN`. The collector passes it to `git clone` as an auth header through git's environment config, so it never appears in the command line or logs. Without the secret, public repos still work.
 
-### Common tasks
+## Common tasks
 
-**Add or remove a repo**: edit `collector/repos.txt`. A newly added repo shows its full LOC as `↑` on its first day.
+**Add or remove a repo**: edit `collector/repos.txt`.
 
 **Update now**: Actions tab → *code stats* → *Run workflow*.
 
@@ -65,7 +76,7 @@ cd collector
 go run . -root ..
 ```
 
-This writes today's snapshot and both SVGs into the repo, just like CI.
+This writes today's snapshot and `assets/code-report.svg` into the repo, just like CI. Private repos need `CODE_STATS_TOKEN` in the environment.
 
 **Preview a different time** (e.g. a quiet day) without touching real data: point `-root` at a scratch copy.
 
@@ -73,12 +84,14 @@ This writes today's snapshot and both SVGs into the repo, just like CI.
 mkdir -p /tmp/preview/collector && cp collector/repos.txt /tmp/preview/collector/
 cp -r stats /tmp/preview/
 (cd collector && go run . -root /tmp/preview -now 2026-10-19T10:17:00-07:00)
-open /tmp/preview/assets/code-stats-dark.svg
+open /tmp/preview/assets/code-report.svg
 ```
 
 **Change what counts as code**: `collector/lang.go` (`langByExt`, `skipNames`, `skipDirs`, `skipSuffixes`).
 
-**Change the look**: `collector/render.go`. Colors are GitHub's palette, in `darkTheme` / `lightTheme`.
+**Change the look**: `collector/render.go`. The AI logo row is `collector/logos.go`.
+
+**Tests**: `cd collector && go test ./...`
 
 ### Optional: update right after a push
 
@@ -104,34 +117,10 @@ jobs:
             -d '{"event_type":"code-push"}'
 ```
 
-## Visitor counter
-
-`worker/src/index.js` handles `GET /views.svg`: it adds 1 in D1 and returns the new count as an SVG. Deployed at `https://profile-views.tianbo-dev.workers.dev/views.svg`.
-
-- **Atomic**: the increment is a single SQL upsert (`ON CONFLICT … SET n = n + 1 RETURNING n`), so concurrent views can't overwrite each other.
-- **Theme**: `?theme=dark` / `?theme=light` fixes the text color, and the README picks one with `<picture>`, the same way as the widget. Without the parameter the SVG follows the OS setting.
-- **No caching**: the response sends `no-cache`, so GitHub's image proxy fetches a fresh count each time.
-- **Approximate**: every view goes through GitHub's image proxy, so there's no visitor IP. Your own views, bots and proxy retries all count. Anyone can inflate it by requesting the URL.
-- **Cost**: free plan (100k requests/day, 100k D1 writes/day). Past the limit the image breaks until 00:00 UTC. Nothing is billed.
-
-### Common tasks
-
-Run these from `worker/` (needs `wrangler login`):
-
-```sh
-wrangler deploy                      # ship changes to src/index.js
-wrangler dev                         # local test at http://localhost:8787/views.svg
-                                     # (first time: wrangler d1 execute profile-views --local --file schema.sql)
-
-# read or set the count
-wrangler d1 execute profile-views --remote --command "SELECT n FROM counter"
-wrangler d1 execute profile-views --remote --command "UPDATE counter SET n = 1000 WHERE id = 'profile'"
-```
-
-The D1 database id in `wrangler.toml` is not a secret; access needs your Cloudflare login.
-
 ## Known limits
 
-- **Fonts**: an SVG in an `<img>` can't load web fonts, so the widget uses the viewer's monospace font (JetBrains Mono if installed, else SF Mono / Menlo / Consolas). Numbers are right-aligned, so columns line up with any monospace font.
-- **Theme**: both README images use `<picture>` with `prefers-color-scheme`, which GitHub matches to the viewer's GitHub theme (Settings → Appearance).
+- **Fonts**: an SVG shown as an image can't load web fonts. The condensed figures use a Barlow Condensed subset inlined in the SVG; small labels use the viewer's monospace font (SF Mono / Menlo / Consolas).
+- **Theme**: one light card for both GitHub themes; it reads as a printed sheet on a dark page.
+- **Motion**: digits roll up and bars grow when the image loads, and the red dot pulses. Viewers with reduced motion get the final state at once.
 - **Late commits**: rebasing or pushing old commits later puts them back on the day they were written. That past day's snapshot won't be rewritten, so its numbers can be slightly low.
+- **Tokens from one machine**: only the laptop running `report-tokens` is counted.

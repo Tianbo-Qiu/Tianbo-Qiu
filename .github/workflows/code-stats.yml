@@ -8,6 +8,9 @@ on:
   workflow_dispatch:         # "Run workflow" button in the Actions tab
   repository_dispatch:
     types: [code-push]       # optional: sent from tracked repos on push
+  push:
+    branches: [main]
+    paths: [stats/tokens.json] # new token totals from report-tokens
 
 permissions:
   contents: write
@@ -29,6 +32,8 @@ jobs:
 
       - name: Collect stats and render widget
         working-directory: collector
+        env:
+          CODE_STATS_TOKEN: ${{ secrets.CODE_STATS_TOKEN }} # read access to private repos
         run: go run . -root ..
 
       - name: Commit if changed
@@ -41,4 +46,6 @@ jobs:
             exit 0
           fi
           git commit -m "chore: update code stats"
+          # report-tokens may have pushed tokens.json meanwhile; it touches no file we write.
+          git pull --rebase
           git push
